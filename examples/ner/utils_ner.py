@@ -46,7 +46,7 @@ class InputExample:
 
     guid: str
     words: List[str]
-    labels: Optional[List[str]]
+    labels: Optional[List[Union[str, List[str]]]]
 
 
 @dataclass
