@@ -149,8 +149,12 @@ class T5LayerNorm(nn.Module):
         self.variance_epsilon = eps
 
     def forward(self, x):
-        variance = x.pow(2).mean(-1, keepdim=True)
+        # layer norm should always be calculated in float32
+        variance = x.to(torch.float32).pow(2).mean(-1, keepdim=True)
         x = x / torch.sqrt(variance + self.variance_epsilon)
+
+        if self.weight.dtype == torch.float16:
+            x = x.to(torch.float16)
         return self.weight * x
 
 
@@ -666,7 +670,10 @@ class T5Stack(T5PreTrainedModel):
         elif inputs_embeds is not None:
             input_shape = inputs_embeds.size()[:-1]
         else:
-            raise ValueError("You have to specify either input_ids or inputs_embeds")
+            if self.is_decoder:
+                raise ValueError("You have to specify either decoder_input_ids or decoder_inputs_embeds")
+            else:
+                raise ValueError("You have to specify either input_ids or inputs_embeds")
 
         if inputs_embeds is None:
             assert self.embed_tokens is not None, "You have to intialize the model with valid token embeddings"
@@ -688,14 +695,16 @@ class T5Stack(T5PreTrainedModel):
             attention_mask = torch.ones(batch_size, mask_seq_length).to(inputs_embeds.device)
         if self.is_decoder and encoder_attention_mask is None and encoder_hidden_states is not None:
             encoder_seq_length = encoder_hidden_states.shape[1]
-            encoder_attention_mask = torch.ones(batch_size, encoder_seq_length).to(inputs_embeds.device)
+            encoder_attention_mask = torch.ones(
+                batch_size, encoder_seq_length, device=inputs_embeds.device, dtype=torch.long
+            )
 
         # initialize past_key_value_states with `None` if past does not exist
         if past_key_value_states is None:
             past_key_value_states = [None] * len(self.block)
 
         # ourselves in which case we just need to make it broadcastable to all heads.
-        extended_attention_mask = self.get_extended_attention_mask(attention_mask, input_shape, self.device)
+        extended_attention_mask = self.get_extended_attention_mask(attention_mask, input_shape, inputs_embeds.device)
 
         if self.is_decoder and encoder_attention_mask is not None:
             encoder_extended_attention_mask = self.invert_attention_mask(encoder_attention_mask)
@@ -730,12 +739,13 @@ class T5Stack(T5PreTrainedModel):
             # layer_outputs is a tuple with:
             # hidden-states, key-value-states, (self-attention weights), (self-attention position bias), (cross-attention weights), (cross-attention position bias)
             hidden_states, present_key_value_state = layer_outputs[:2]
+
             if i == 0:
                 # We share the position biases between the layers - the first layer store them
                 # layer_outputs = hidden-states, key-value-states (self-attention weights), (self-attention position bias), (cross-attention weights), (cross-attention position bias)
                 position_bias = layer_outputs[3 if self.output_attentions else 2]
                 if self.is_decoder and encoder_hidden_states is not None:
-                    encoder_decoder_position_bias = layer_outputs[4 if self.output_attentions else 3]
+                    encoder_decoder_position_bias = layer_outputs[5 if self.output_attentions else 3]
             # append next layer key value states
             present_key_value_states = present_key_value_states + (present_key_value_state,)
 

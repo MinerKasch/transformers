@@ -2,7 +2,7 @@
 # There's no way to ignore "F401 '...' imported but unused" warnings in this
 # module, but to preserve other warnings. So, don't check this module at all.
 
-__version__ = "2.8.0"
+__version__ = "2.10.0"
 
 # Work around to update TensorFlow's absl.logging threshold which alters the
 # default Python logging output behavior when present.
@@ -19,19 +19,6 @@ else:
 
 import logging
 
-# Benchmarking
-from .benchmark_utils import (
-    Frame,
-    Memory,
-    MemoryState,
-    MemorySummary,
-    MemoryTrace,
-    UsedMemoryState,
-    bytes_to_human_readable,
-    start_memory_tracing,
-    stop_memory_tracing,
-)
-
 # Configurations
 from .configuration_albert import ALBERT_PRETRAINED_CONFIG_ARCHIVE_MAP, AlbertConfig
 from .configuration_auto import ALL_PRETRAINED_CONFIG_ARCHIVE_MAP, CONFIG_MAPPING, AutoConfig
@@ -44,9 +31,11 @@ from .configuration_electra import ELECTRA_PRETRAINED_CONFIG_ARCHIVE_MAP, Electr
 from .configuration_encoder_decoder import EncoderDecoderConfig
 from .configuration_flaubert import FLAUBERT_PRETRAINED_CONFIG_ARCHIVE_MAP, FlaubertConfig
 from .configuration_gpt2 import GPT2_PRETRAINED_CONFIG_ARCHIVE_MAP, GPT2Config
+from .configuration_longformer import LONGFORMER_PRETRAINED_CONFIG_ARCHIVE_MAP, LongformerConfig
 from .configuration_marian import MarianConfig
 from .configuration_mmbt import MMBTConfig
 from .configuration_openai import OPENAI_GPT_PRETRAINED_CONFIG_ARCHIVE_MAP, OpenAIGPTConfig
+from .configuration_reformer import REFORMER_PRETRAINED_CONFIG_ARCHIVE_MAP, ReformerConfig
 from .configuration_roberta import ROBERTA_PRETRAINED_CONFIG_ARCHIVE_MAP, RobertaConfig
 from .configuration_t5 import T5_PRETRAINED_CONFIG_ARCHIVE_MAP, T5Config
 from .configuration_transfo_xl import TRANSFO_XL_PRETRAINED_CONFIG_ARCHIVE_MAP, TransfoXLConfig
@@ -137,7 +126,9 @@ from .tokenization_distilbert import DistilBertTokenizer, DistilBertTokenizerFas
 from .tokenization_electra import ElectraTokenizer, ElectraTokenizerFast
 from .tokenization_flaubert import FlaubertTokenizer
 from .tokenization_gpt2 import GPT2Tokenizer, GPT2TokenizerFast
+from .tokenization_longformer import LongformerTokenizer, LongformerTokenizerFast
 from .tokenization_openai import OpenAIGPTTokenizer, OpenAIGPTTokenizerFast
+from .tokenization_reformer import ReformerTokenizer
 from .tokenization_roberta import RobertaTokenizer, RobertaTokenizerFast
 from .tokenization_t5 import T5Tokenizer
 from .tokenization_transfo_xl import TransfoXLCorpus, TransfoXLTokenizer, TransfoXLTokenizerFast
@@ -145,7 +136,9 @@ from .tokenization_utils import PreTrainedTokenizer
 from .tokenization_xlm import XLMTokenizer
 from .tokenization_xlm_roberta import XLMRobertaTokenizer
 from .tokenization_xlnet import SPIECE_UNDERLINE, XLNetTokenizer
+from .trainer_utils import EvalPrediction
 from .training_args import TrainingArguments
+from .training_args_tf import TFTrainingArguments
 
 
 logger = logging.getLogger(__name__)  # pylint: disable=invalid-name
@@ -157,7 +150,7 @@ if is_sklearn_available():
 
 # Modeling
 if is_torch_available():
-    from .modeling_utils import PreTrainedModel, prune_layer, Conv1D, top_k_top_p_filtering
+    from .modeling_utils import PreTrainedModel, prune_layer, Conv1D, top_k_top_p_filtering, apply_chunking_to_forward
     from .modeling_auto import (
         AutoModel,
         AutoModelForPreTraining,
@@ -189,6 +182,7 @@ if is_torch_available():
         BertForQuestionAnswering,
         load_tf_weights_in_bert,
         BERT_PRETRAINED_MODEL_ARCHIVE_MAP,
+        BertLayer,
     )
     from .modeling_openai import (
         OpenAIGPTPreTrainedModel,
@@ -244,7 +238,7 @@ if is_torch_available():
         BART_PRETRAINED_MODEL_ARCHIVE_MAP,
     )
     from .modeling_marian import MarianMTModel
-    from .tokenization_marian import MarianSentencePieceTokenizer
+    from .tokenization_marian import MarianTokenizer
     from .modeling_roberta import (
         RobertaForMaskedLM,
         RobertaModel,
@@ -283,6 +277,7 @@ if is_torch_available():
     from .modeling_albert import (
         AlbertPreTrainedModel,
         AlbertModel,
+        AlbertForPreTraining,
         AlbertForMaskedLM,
         AlbertForSequenceClassification,
         AlbertForQuestionAnswering,
@@ -313,9 +308,28 @@ if is_torch_available():
         ElectraForPreTraining,
         ElectraForMaskedLM,
         ElectraForTokenClassification,
+        ElectraPreTrainedModel,
+        ElectraForSequenceClassification,
         ElectraModel,
         load_tf_weights_in_electra,
         ELECTRA_PRETRAINED_MODEL_ARCHIVE_MAP,
+    )
+
+    from .modeling_reformer import (
+        ReformerAttention,
+        ReformerLayer,
+        ReformerModel,
+        ReformerModelWithLMHead,
+        REFORMER_PRETRAINED_MODEL_ARCHIVE_MAP,
+    )
+
+    from .modeling_longformer import (
+        LongformerModel,
+        LongformerForMaskedLM,
+        LongformerForSequenceClassification,
+        LongformerForTokenClassification,
+        LongformerForQuestionAnswering,
+        LONGFORMER_PRETRAINED_MODEL_ARCHIVE_MAP,
     )
 
     # Optimization
@@ -333,6 +347,9 @@ if is_torch_available():
     from .data.data_collator import DefaultDataCollator, DataCollator, DataCollatorForLanguageModeling
     from .data.datasets import GlueDataset, TextDataset, LineByLineTextDataset, GlueDataTrainingArguments
 
+    # Benchmarks
+    from .benchmark import PyTorchBenchmark, PyTorchBenchmarkArguments
+
 # TensorFlow
 if is_tf_available():
     from .modeling_tf_utils import (
@@ -345,6 +362,7 @@ if is_tf_available():
     from .modeling_tf_auto import (
         TFAutoModel,
         TFAutoModelForPreTraining,
+        TFAutoModelForMultipleChoice,
         TFAutoModelForSequenceClassification,
         TFAutoModelForQuestionAnswering,
         TFAutoModelWithLMHead,
@@ -477,7 +495,9 @@ if is_tf_available():
         TFAlbertPreTrainedModel,
         TFAlbertMainLayer,
         TFAlbertModel,
+        TFAlbertForPreTraining,
         TFAlbertForMaskedLM,
+        TFAlbertForMultipleChoice,
         TFAlbertForSequenceClassification,
         TFAlbertForQuestionAnswering,
         TF_ALBERT_PRETRAINED_MODEL_ARCHIVE_MAP,
@@ -501,6 +521,9 @@ if is_tf_available():
 
     # Optimization
     from .optimization_tf import WarmUp, create_optimizer, AdamWeightDecay, GradientAccumulator
+
+    # Trainer
+    from .trainer_tf import TFTrainer
 
 
 if not is_tf_available() and not is_torch_available():

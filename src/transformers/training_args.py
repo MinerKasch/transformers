@@ -2,13 +2,26 @@ import dataclasses
 import json
 import logging
 from dataclasses import dataclass, field
-from typing import Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 from .file_utils import cached_property, is_torch_available, torch_required
 
 
 if is_torch_available():
     import torch
+
+
+try:
+    import torch_xla.core.xla_model as xm
+
+    _has_tpu = True
+except ImportError:
+    _has_tpu = False
+
+
+@torch_required
+def is_tpu_available():
+    return _has_tpu
 
 
 logger = logging.getLogger(__name__)
@@ -45,8 +58,28 @@ class TrainingArguments:
         default=False, metadata={"help": "Run evaluation during training at each logging step."},
     )
 
-    per_gpu_train_batch_size: int = field(default=8, metadata={"help": "Batch size per GPU/CPU for training."})
-    per_gpu_eval_batch_size: int = field(default=8, metadata={"help": "Batch size per GPU/CPU for evaluation."})
+    per_device_train_batch_size: int = field(
+        default=8, metadata={"help": "Batch size per GPU/TPU core/CPU for training."}
+    )
+    per_device_eval_batch_size: int = field(
+        default=8, metadata={"help": "Batch size per GPU/TPU core/CPU for evaluation."}
+    )
+
+    per_gpu_train_batch_size: Optional[int] = field(
+        default=None,
+        metadata={
+            "help": "Deprecated, the use of `--per_device_train_batch_size` is preferred. "
+            "Batch size per GPU/TPU core/CPU for training."
+        },
+    )
+    per_gpu_eval_batch_size: Optional[int] = field(
+        default=None,
+        metadata={
+            "help": "Deprecated, the use of `--per_device_eval_batch_size` is preferred."
+            "Batch size per GPU/TPU core/CPU for evaluation."
+        },
+    )
+
     gradient_accumulation_steps: int = field(
         default=1,
         metadata={"help": "Number of updates steps to accumulate before performing a backward/update pass."},
@@ -77,7 +110,7 @@ class TrainingArguments:
             )
         },
     )
-    no_cuda: bool = field(default=False, metadata={"help": "Avoid using CUDA even if it is available"})
+    no_cuda: bool = field(default=False, metadata={"help": "Do not use CUDA even when it is available"})
     seed: int = field(default=42, metadata={"help": "random seed for initialization"})
 
     fp16: bool = field(
@@ -95,13 +128,30 @@ class TrainingArguments:
     )
     local_rank: int = field(default=-1, metadata={"help": "For distributed training: local_rank"})
 
+    tpu_num_cores: Optional[int] = field(
+        default=None, metadata={"help": "TPU: Number of TPU cores (automatically passed by launcher script)"}
+    )
+    tpu_metrics_debug: bool = field(default=False, metadata={"help": "TPU: Whether to print debug metrics"})
+
     @property
     def train_batch_size(self) -> int:
-        return self.per_gpu_train_batch_size * max(1, self.n_gpu)
+        if self.per_gpu_train_batch_size:
+            logger.warning(
+                "Using deprecated `--per_gpu_train_batch_size` argument which will be removed in a future "
+                "version. Using `--per_device_train_batch_size` is preferred."
+            )
+        per_device_batch_size = self.per_gpu_train_batch_size or self.per_device_train_batch_size
+        return per_device_batch_size * max(1, self.n_gpu)
 
     @property
     def eval_batch_size(self) -> int:
-        return self.per_gpu_eval_batch_size * max(1, self.n_gpu)
+        if self.per_gpu_eval_batch_size:
+            logger.warning(
+                "Using deprecated `--per_gpu_eval_batch_size` argument which will be removed in a future "
+                "version. Using `--per_device_eval_batch_size` is preferred."
+            )
+        per_device_batch_size = self.per_gpu_eval_batch_size or self.per_device_eval_batch_size
+        return per_device_batch_size * max(1, self.n_gpu)
 
     @cached_property
     @torch_required
@@ -109,6 +159,9 @@ class TrainingArguments:
         logger.info("PyTorch: setting up devices")
         if self.no_cuda:
             device = torch.device("cpu")
+            n_gpu = 0
+        elif is_tpu_available():
+            device = xm.xla_device()
             n_gpu = 0
         elif self.local_rank == -1:
             # if n_gpu is > 1 we'll use nn.DataParallel.
@@ -138,3 +191,13 @@ class TrainingArguments:
         Serializes this instance to a JSON string.
         """
         return json.dumps(dataclasses.asdict(self), indent=2)
+
+    def to_sanitized_dict(self) -> Dict[str, Any]:
+        """
+        Sanitized serialization to use with TensorBoard’s hparams
+        """
+        d = dataclasses.asdict(self)
+        valid_types = [bool, int, float, str]
+        if is_torch_available():
+            valid_types.append(torch.Tensor)
+        return {k: v if type(v) in valid_types else str(v) for k, v in d.items()}
