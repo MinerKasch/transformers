@@ -28,7 +28,7 @@ from torch import nn
 
 from transformers import (
     AutoConfig,
-    AutoModelForTokenClassification,
+    AutoModelForTokenMultiLabelClassification,
     AutoTokenizer,
     EvalPrediction,
     HfArgumentParser,
@@ -154,12 +154,14 @@ def main():
         cache_dir=model_args.cache_dir,
         use_fast=model_args.use_fast,
     )
-    model = AutoModelForTokenClassification.from_pretrained(
+    model = AutoModelForTokenMultiLabelClassification.from_pretrained(
         model_args.model_name_or_path,
         from_tf=bool(".ckpt" in model_args.model_name_or_path),
         config=config,
         cache_dir=model_args.cache_dir,
     )
+
+    import pdb; pdb.set_trace()
 
     # Get datasets
     train_dataset = (
@@ -175,6 +177,7 @@ def main():
         if training_args.do_train
         else None
     )
+    import pdb; pdb.set_trace()
     eval_dataset = (
         NerDataset(
             data_dir=data_args.data_dir,
