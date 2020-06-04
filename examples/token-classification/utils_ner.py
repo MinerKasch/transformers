@@ -91,6 +91,7 @@ if is_torch_available():
             max_seq_length: Optional[int] = None,
             overwrite_cache=False,
             mode: Split = Split.train,
+            multilabeling = False,
         ):
             # Load data features from cache or dataset file
             cached_features_file = os.path.join(
@@ -107,7 +108,7 @@ if is_torch_available():
                     self.features = torch.load(cached_features_file)
                 else:
                     logger.info(f"Creating features from dataset file at {data_dir}")
-                    examples = read_examples_from_file(data_dir, mode)
+                    examples = read_examples_from_file(data_dir, mode, multilabeling=multilabeling)
                     # TODO clean up all this to leverage built-in features of tokenizers
                     self.features = convert_examples_to_features(
                         examples,
@@ -230,7 +231,8 @@ if is_tf_available():
             return self.features[i]
 
 
-def read_examples_from_file(data_dir, mode: Union[Split, str]) -> List[InputExample]:
+def read_examples_from_file(data_dir, mode: Union[Split, str],
+                            multilabeling=False) -> List[InputExample]:
     if isinstance(mode, Split):
         mode = mode.value
     file_path = os.path.join(data_dir, f"{mode}.txt")
@@ -250,10 +252,21 @@ def read_examples_from_file(data_dir, mode: Union[Split, str]) -> List[InputExam
                 splits = line.split(" ")
                 words.append(splits[0])
                 if len(splits) > 1:
-                    labels.append(splits[-1].replace("\n", ""))
+                    if not multilabeling:
+                        labels.append(splits[-1].replace("\n", ""))
+                    else:
+                        # I'm not sure why we're replacing newlines (or why we
+                        # could even have newlines here since we've already
+                        # split on them when reading 'for line in f') but doing
+                        # this for consistency with the non-multilabeling case
+                        sp = [split.replace("\n", "") for split in splits[1:]]
+                        labels.append(sp)
                 else:
-                    # Examples could have no label for mode = "test"
-                    labels.append("O")
+                    if not multilabeling:
+                        # Examples could have no label for mode = "test"
+                        labels.append("O")
+                    else:
+                        labels.append(["O"])
         if words:
             examples.append(InputExample(guid=f"{mode}-{guid_index}", words=words, labels=labels))
     return examples
@@ -300,7 +313,8 @@ def convert_examples_to_features(
             if len(word_tokens) > 0:
                 tokens.extend(word_tokens)
                 # Use the real label id for the first token of the word, and padding ids for the remaining tokens
-                label_ids.extend([label_map[label]] + [pad_token_label_id] * (len(word_tokens) - 1))
+                label_ids.extend([[label_map[l] for l in label]] +
+                                 [[pad_token_label_id]] * (len(word_tokens) - 1))
 
         # Account for [CLS] and [SEP] with "- 2" and with "- 3" for RoBERTa.
         special_tokens_count = tokenizer.num_special_tokens_to_add()
@@ -327,20 +341,20 @@ def convert_examples_to_features(
         # used as as the "sentence vector". Note that this only makes sense because
         # the entire model is fine-tuned.
         tokens += [sep_token]
-        label_ids += [pad_token_label_id]
+        label_ids += [[pad_token_label_id]]
         if sep_token_extra:
             # roberta uses an extra separator b/w pairs of sentences
             tokens += [sep_token]
-            label_ids += [pad_token_label_id]
+            label_ids += [[pad_token_label_id]]
         segment_ids = [sequence_a_segment_id] * len(tokens)
 
         if cls_token_at_end:
             tokens += [cls_token]
-            label_ids += [pad_token_label_id]
+            label_ids += [[pad_token_label_id]]
             segment_ids += [cls_token_segment_id]
         else:
             tokens = [cls_token] + tokens
-            label_ids = [pad_token_label_id] + label_ids
+            label_ids = [[pad_token_label_id]] + label_ids
             segment_ids = [cls_token_segment_id] + segment_ids
 
         input_ids = tokenizer.convert_tokens_to_ids(tokens)
@@ -355,12 +369,12 @@ def convert_examples_to_features(
             input_ids = ([pad_token] * padding_length) + input_ids
             input_mask = ([0 if mask_padding_with_zero else 1] * padding_length) + input_mask
             segment_ids = ([pad_token_segment_id] * padding_length) + segment_ids
-            label_ids = ([pad_token_label_id] * padding_length) + label_ids
+            label_ids = ([[pad_token_label_id]] * padding_length) + label_ids
         else:
             input_ids += [pad_token] * padding_length
             input_mask += [0 if mask_padding_with_zero else 1] * padding_length
             segment_ids += [pad_token_segment_id] * padding_length
-            label_ids += [pad_token_label_id] * padding_length
+            label_ids += [[pad_token_label_id]] * padding_length
 
         assert len(input_ids) == max_seq_length
         assert len(input_mask) == max_seq_length

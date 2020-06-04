@@ -179,6 +179,7 @@ class Trainer:
         prediction_loss_only=False,
         tb_writer: Optional["SummaryWriter"] = None,
         optimizers: Tuple[torch.optim.Optimizer, torch.optim.lr_scheduler.LambdaLR] = None,
+        labels = None,
     ):
         """
         Trainer is a simple but feature-complete training and eval loop for PyTorch,
@@ -193,7 +194,7 @@ class Trainer:
         if data_collator is not None:
             self.data_collator = data_collator
         else:
-            self.data_collator = DefaultDataCollator()
+            self.data_collator = DefaultDataCollator(label_list=labels)
         self.train_dataset = train_dataset
         self.eval_dataset = eval_dataset
         self.compute_metrics = compute_metrics

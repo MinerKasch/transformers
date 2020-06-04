@@ -161,8 +161,6 @@ def main():
         cache_dir=model_args.cache_dir,
     )
 
-    import pdb; pdb.set_trace()
-
     # Get datasets
     train_dataset = (
         NerDataset(
@@ -173,11 +171,11 @@ def main():
             max_seq_length=data_args.max_seq_length,
             overwrite_cache=data_args.overwrite_cache,
             mode=Split.train,
+            multilabeling=True,
         )
         if training_args.do_train
         else None
     )
-    import pdb; pdb.set_trace()
     eval_dataset = (
         NerDataset(
             data_dir=data_args.data_dir,
@@ -187,6 +185,7 @@ def main():
             max_seq_length=data_args.max_seq_length,
             overwrite_cache=data_args.overwrite_cache,
             mode=Split.dev,
+            multilabeling=True,
         )
         if training_args.do_eval
         else None
@@ -223,6 +222,7 @@ def main():
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
         compute_metrics=compute_metrics,
+        labels=labels
     )
 
     # Training
@@ -263,6 +263,7 @@ def main():
             max_seq_length=data_args.max_seq_length,
             overwrite_cache=data_args.overwrite_cache,
             mode=Split.test,
+            multilabeling=True,
         )
 
         predictions, label_ids, metrics = trainer.predict(test_dataset)
