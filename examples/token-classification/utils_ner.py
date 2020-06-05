@@ -66,6 +66,47 @@ class Split(Enum):
     test = "test"
 
 
+def read_examples_from_file(data_dir, mode: Union[Split, str],
+                            multilabeling=False) -> List[InputExample]:
+    if isinstance(mode, Split):
+        mode = mode.value
+    file_path = os.path.join(data_dir, f"{mode}.txt")
+    guid_index = 1
+    examples = []
+    with open(file_path, encoding="utf-8") as f:
+        words = []
+        labels = []
+        for line in f:
+            if line.startswith("-DOCSTART-") or line == "" or line == "\n":
+                if words:
+                    examples.append(InputExample(guid=f"{mode}-{guid_index}", words=words, labels=labels))
+                    guid_index += 1
+                    words = []
+                    labels = []
+            else:
+                splits = line.split(" ")
+                words.append(splits[0])
+                if len(splits) > 1:
+                    if not multilabeling:
+                        labels.append(splits[-1].replace("\n", ""))
+                    else:
+                        # I'm not sure why we're replacing newlines (or why we
+                        # could even have newlines here since we've already
+                        # split on them when reading 'for line in f') but doing
+                        # this for consistency with the non-multilabeling case
+                        sp = [split.replace("\n", "") for split in splits[1:]]
+                        labels.append(sp)
+                else:
+                    if not multilabeling:
+                        # Examples could have no label for mode = "test"
+                        labels.append("O")
+                    else:
+                        labels.append(["O"])
+        if words:
+            examples.append(InputExample(guid=f"{mode}-{guid_index}", words=words, labels=labels))
+    return examples
+
+
 if is_torch_available():
     import torch
     from torch import nn
@@ -92,6 +133,7 @@ if is_torch_available():
             overwrite_cache=False,
             mode: Split = Split.train,
             multilabeling = False,
+            example_reader = read_examples_from_file,
         ):
             # Load data features from cache or dataset file
             cached_features_file = os.path.join(
@@ -108,7 +150,7 @@ if is_torch_available():
                     self.features = torch.load(cached_features_file)
                 else:
                     logger.info(f"Creating features from dataset file at {data_dir}")
-                    examples = read_examples_from_file(data_dir, mode, multilabeling=multilabeling)
+                    examples = example_reader(data_dir, mode, tokenizer=tokenizer, multilabeling=multilabeling)
                     # TODO clean up all this to leverage built-in features of tokenizers
                     self.features = convert_examples_to_features(
                         examples,
@@ -229,47 +271,6 @@ if is_tf_available():
 
         def __getitem__(self, i) -> InputFeatures:
             return self.features[i]
-
-
-def read_examples_from_file(data_dir, mode: Union[Split, str],
-                            multilabeling=False) -> List[InputExample]:
-    if isinstance(mode, Split):
-        mode = mode.value
-    file_path = os.path.join(data_dir, f"{mode}.txt")
-    guid_index = 1
-    examples = []
-    with open(file_path, encoding="utf-8") as f:
-        words = []
-        labels = []
-        for line in f:
-            if line.startswith("-DOCSTART-") or line == "" or line == "\n":
-                if words:
-                    examples.append(InputExample(guid=f"{mode}-{guid_index}", words=words, labels=labels))
-                    guid_index += 1
-                    words = []
-                    labels = []
-            else:
-                splits = line.split(" ")
-                words.append(splits[0])
-                if len(splits) > 1:
-                    if not multilabeling:
-                        labels.append(splits[-1].replace("\n", ""))
-                    else:
-                        # I'm not sure why we're replacing newlines (or why we
-                        # could even have newlines here since we've already
-                        # split on them when reading 'for line in f') but doing
-                        # this for consistency with the non-multilabeling case
-                        sp = [split.replace("\n", "") for split in splits[1:]]
-                        labels.append(sp)
-                else:
-                    if not multilabeling:
-                        # Examples could have no label for mode = "test"
-                        labels.append("O")
-                    else:
-                        labels.append(["O"])
-        if words:
-            examples.append(InputExample(guid=f"{mode}-{guid_index}", words=words, labels=labels))
-    return examples
 
 
 def convert_examples_to_features(

@@ -39,6 +39,8 @@ from transformers import (
 from utils_ner import NerDataset, Split, get_labels
 
 import fsn4nlp.utils.conlleval
+import fsn4nlp.data.medmentions
+import fsn4nlp.run.utils_ner
 
 
 logger = logging.getLogger(__name__)
@@ -174,6 +176,7 @@ def main():
             overwrite_cache=data_args.overwrite_cache,
             mode=Split.train,
             multilabeling=True,
+            example_reader=fsn4nlp.run.utils_ner.read_examples_from_file
         )
         if training_args.do_train
         else None
@@ -188,6 +191,7 @@ def main():
             overwrite_cache=data_args.overwrite_cache,
             mode=Split.dev,
             multilabeling=True,
+            example_reader=fsn4nlp.run.utils_ner.read_examples_from_file
         )
         if training_args.do_eval
         else None
@@ -281,6 +285,7 @@ def main():
             overwrite_cache=data_args.overwrite_cache,
             mode=Split.test,
             multilabeling=True,
+            example_reader=fsn4nlp.run.utils_ner.read_examples_from_file
         )
 
         predictions, label_ids, metrics = trainer.predict(test_dataset)
