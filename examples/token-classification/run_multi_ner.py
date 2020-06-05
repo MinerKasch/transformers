@@ -191,24 +191,34 @@ def main():
         else None
     )
 
-    def align_predictions(predictions: np.ndarray, label_ids: np.ndarray) -> Tuple[List[int], List[int]]:
-        preds = np.argmax(predictions, axis=2)
 
-        batch_size, seq_len = preds.shape
+    def align_predictions(predictions: np.ndarray,
+                          label_ids: np.ndarray) -> Tuple[List[List[str]], List[List[str]]]:
+        logit_threshold = 0.0 # Corresponds to a probability of 0.5 if fed through a sigmoid.
+        preds = predictions > logit_threshold
+        batch_size, seq_len, _ = preds.shape
+
+        # is_tagged indicates for each token whether it has an associated tag (i.e. a
+        # label, including the O label) and should be assessed, otherwise it's
+        # a padding or special token.
+        is_tagged = label_ids.sum(axis=2) > 0
 
         out_label_list = [[] for _ in range(batch_size)]
         preds_list = [[] for _ in range(batch_size)]
 
         for i in range(batch_size):
             for j in range(seq_len):
-                if label_ids[i, j] != nn.CrossEntropyLoss().ignore_index:
-                    out_label_list[i].append(label_map[label_ids[i][j]])
-                    preds_list[i].append(label_map[preds[i][j]])
-
-        return preds_list, out_label_list
+                if is_tagged[i, j]:
+                    #out_label_list[i].append(label_map[label_ids[i][j]])
+                    out_label_list[i].append(
+                        [label_map[x] for x in np.where(label_ids[i][j] == 1)[0]])
+                    #preds_list[i].append(label_map[preds[i][j]])
+                    preds_list[i].append(
+                        [label_map[x] for x in np.where(preds[i][j] == 1)[0]])
 
     def compute_metrics(p: EvalPrediction) -> Dict:
         preds_list, out_label_list = align_predictions(p.predictions, p.label_ids)
+        import pdb; pdb.set_trace()
         return {
             "precision": precision_score(out_label_list, preds_list),
             "recall": recall_score(out_label_list, preds_list),
