@@ -38,6 +38,8 @@ from transformers import (
 )
 from utils_ner import NerDataset, Split, get_labels
 
+import fsn4nlp.utils.conlleval
+
 
 logger = logging.getLogger(__name__)
 
@@ -216,15 +218,20 @@ def main():
                     preds_list[i].append(
                         [label_map[x] for x in np.where(preds[i][j] == 1)[0]])
 
+        return preds_list, out_label_list
+
     def compute_metrics(p: EvalPrediction) -> Dict:
         preds_list, out_label_list = align_predictions(p.predictions, p.label_ids)
-        import pdb; pdb.set_trace()
+        (chunk_prec, chunk_rec, chunk_f1,
+         tok_prec, tok_rec, tok_f1) = fsn4nlp.utils.conlleval.evaluate_multilabel(out_label_list, preds_list)
         return {
-            "precision": precision_score(out_label_list, preds_list),
-            "recall": recall_score(out_label_list, preds_list),
-            "f1": f1_score(out_label_list, preds_list),
+            "chunk_precision": chunk_prec,
+            "chunk_recall": chunk_rec,
+            "chunk_f1": chunk_f1,
+            "tok_precision": tok_prec,
+            "tok_recall": tok_rec,
+            "tok_f1": tok_f1,
         }
-
     # Initialize our Trainer
     trainer = Trainer(
         model=model,
@@ -298,7 +305,7 @@ def main():
                             if not preds_list[example_id]:
                                 example_id += 1
                         elif preds_list[example_id]:
-                            output_line = line.split()[0] + " " + preds_list[example_id].pop(0) + "\n"
+                            output_line = line.split()[0] + " " + " ".join(preds_list[example_id].pop(0)) + "\n"
                             writer.write(output_line)
                         else:
                             logger.warning(
