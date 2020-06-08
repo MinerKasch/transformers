@@ -16,6 +16,7 @@
 """ Named entity recognition fine-tuning: utilities to work with CoNLL-2003 task. """
 
 
+import json
 import logging
 import os
 from dataclasses import dataclass
@@ -44,7 +45,7 @@ class InputExample:
 
     guid: str
     words: List[str]
-    labels: Optional[List[str]]
+    labels: Optional[List[Union[str, List[str]]]]
 
 
 @dataclass
@@ -66,6 +67,141 @@ class Split(Enum):
     test = "test"
 
 
+def read_spacy_examples_from_file(data_dir, tokenizer, mode: Union[Split, str],
+                                  multilabeling=False) -> List[InputExample]:
+    # TODO Ensure the option to not multilabel is handled correctly here.
+
+    if isinstance(mode, Split):
+        mode = mode.value
+    file_path = os.path.join(data_dir, f"{mode}.json")
+    with open(file_path) as f:
+        data = json.loads(f.read())
+
+    examples = []
+    guid_index = 1
+
+    for example in data:
+        raw = example[0]
+        entities = example[1]["entities"]
+
+        example_words = []
+        example_labels = []
+
+        num_spaces = 0
+        num_nonspaces = 0
+        for token in raw.split():
+            wordpieces = tokenizer.tokenize(token)
+            words = []
+            for wordpiece in wordpieces:
+                # TODO Change this because it's BERT-specific. RoBERTa doesn't
+                # uses the double-hash.
+                if wordpiece.startswith("##"):
+                    words[-1].append(wordpiece)
+                else:
+                    words.append([wordpiece])
+            #words = [join_wordpieces(word) for word in words]
+            words = [tokenizer.convert_tokens_to_string(word) for word in words]
+            for word in words:
+                word_labels = []
+                char_offset = num_nonspaces + num_spaces
+                for start, end, label in entities:
+                    is_start = False
+                    is_end = False
+                    is_middle = False
+                    if start < char_offset and end >= char_offset + len(word):
+                        # Then capture the entity that sits between the start
+                        # and end
+                        # Eg, capture the whole "Trains" token in:
+                        # Fleece works for Metro Trains Melbourne
+                        #                  ^ORG-start           ^ORG-end
+                        is_middle = True
+                    if start >= char_offset and start < char_offset + len(word):
+                        # Then this token is the start of the this entity.
+                        # Eg, capture whole "Metro" token in:
+                        # Fleece works for Metro Trains Melbourne
+                        #                    ^start
+                        # Fleece works for Metro Trains Melbourne
+                        #                  B-ORG
+                        is_start = True
+                    if end >= char_offset and end < char_offset + len(word):
+                        # Then this token should be tagged with entity.
+                        # Eg, capture the whole "Melbourne" token in:
+                        # Fleece works for Metro Trains Melbourne
+                        #                                  ^ORG-end
+                        is_end = True
+
+                    tag = None
+                    if is_start and is_end:
+                        tag = f"B-{label}"
+                    elif is_end:
+                        tag = f"I-{label}"
+                    elif is_start:
+                        tag = f"B-{label}"
+                    if is_middle:
+                        tag = f"I-{label}"
+                    if tag:
+                        word_labels.append(tag)
+                if word_labels == []:
+                    word_labels.append("O")
+                example_labels.append(word_labels)
+                example_words.append(word)
+
+                num_nonspaces += len(word)
+            num_spaces += 1
+        examples.append(InputExample(guid="{}-{}".format(mode, guid_index), words=example_words, labels=example_labels))
+        guid_index += 1
+    import pdb; pdb.set_trace()
+    return examples
+
+def read_conll_examples_from_file(data_dir, mode: Union[Split, str],
+                                  multilabeling=False) -> List[InputExample]:
+    if isinstance(mode, Split):
+        mode = mode.value
+    file_path = os.path.join(data_dir, f"{mode}.txt")
+    guid_index = 1
+    examples = []
+    with open(file_path, encoding="utf-8") as f:
+        words = []
+        labels = []
+        for line in f:
+            if line.startswith("-DOCSTART-") or line == "" or line == "\n":
+                if words:
+                    examples.append(InputExample(guid=f"{mode}-{guid_index}", words=words, labels=labels))
+                    guid_index += 1
+                    words = []
+                    labels = []
+            else:
+                splits = line.split(" ")
+                words.append(splits[0])
+                if len(splits) > 1:
+                    if not multilabeling:
+                        labels.append(splits[-1].replace("\n", ""))
+                    else:
+                        # I'm not sure why we're replacing newlines (or why we
+                        # could even have newlines here since we've already
+                        # split on them when reading 'for line in f') but doing
+                        # this for consistency with the non-multilabeling case
+                        sp = [split.replace("\n", "") for split in splits[1:]]
+                        labels.append(sp)
+                else:
+                    if not multilabeling:
+                        # Examples could have no label for mode = "test"
+                        labels.append("O")
+                    else:
+                        labels.append(["O"])
+        if words:
+            examples.append(InputExample(guid=f"{mode}-{guid_index}", words=words, labels=labels))
+    return examples
+
+
+def read_examples_from_file(data_dir, data_format, tokenizer,
+                            mode: Union[Split, str],
+                            multilabeling=False) -> List[InputExample]:
+    if data_format == "conll":
+        return read_conll_examples_from_file(data_dir, mode, multilabeling=multilabeling)
+    elif data_format == "spacy":
+        return read_spacy_examples_from_file(data_dir, tokenizer, mode, multilabeling=multilabeling)
+
 if is_torch_available():
     import torch
     from torch import nn
@@ -85,12 +221,14 @@ if is_torch_available():
         def __init__(
             self,
             data_dir: str,
+            data_format: str,
             tokenizer: PreTrainedTokenizer,
             labels: List[str],
             model_type: str,
             max_seq_length: Optional[int] = None,
             overwrite_cache=False,
             mode: Split = Split.train,
+            multilabeling = False,
         ):
             # Load data features from cache or dataset file
             cached_features_file = os.path.join(
@@ -107,7 +245,7 @@ if is_torch_available():
                     self.features = torch.load(cached_features_file)
                 else:
                     logger.info(f"Creating features from dataset file at {data_dir}")
-                    examples = read_examples_from_file(data_dir, mode)
+                    examples = read_examples_from_file(data_dir, data_format, tokenizer, mode, multilabeling=multilabeling)
                     # TODO clean up all this to leverage built-in features of tokenizers
                     self.features = convert_examples_to_features(
                         examples,
@@ -230,35 +368,6 @@ if is_tf_available():
             return self.features[i]
 
 
-def read_examples_from_file(data_dir, mode: Union[Split, str]) -> List[InputExample]:
-    if isinstance(mode, Split):
-        mode = mode.value
-    file_path = os.path.join(data_dir, f"{mode}.txt")
-    guid_index = 1
-    examples = []
-    with open(file_path, encoding="utf-8") as f:
-        words = []
-        labels = []
-        for line in f:
-            if line.startswith("-DOCSTART-") or line == "" or line == "\n":
-                if words:
-                    examples.append(InputExample(guid=f"{mode}-{guid_index}", words=words, labels=labels))
-                    guid_index += 1
-                    words = []
-                    labels = []
-            else:
-                splits = line.split(" ")
-                words.append(splits[0])
-                if len(splits) > 1:
-                    labels.append(splits[-1].replace("\n", ""))
-                else:
-                    # Examples could have no label for mode = "test"
-                    labels.append("O")
-        if words:
-            examples.append(InputExample(guid=f"{mode}-{guid_index}", words=words, labels=labels))
-    return examples
-
-
 def convert_examples_to_features(
     examples: List[InputExample],
     label_list: List[str],
@@ -300,7 +409,8 @@ def convert_examples_to_features(
             if len(word_tokens) > 0:
                 tokens.extend(word_tokens)
                 # Use the real label id for the first token of the word, and padding ids for the remaining tokens
-                label_ids.extend([label_map[label]] + [pad_token_label_id] * (len(word_tokens) - 1))
+                label_ids.extend([[label_map[l] for l in label]] +
+                                 [[pad_token_label_id]] * (len(word_tokens) - 1))
 
         # Account for [CLS] and [SEP] with "- 2" and with "- 3" for RoBERTa.
         special_tokens_count = tokenizer.num_special_tokens_to_add()
@@ -327,20 +437,20 @@ def convert_examples_to_features(
         # used as as the "sentence vector". Note that this only makes sense because
         # the entire model is fine-tuned.
         tokens += [sep_token]
-        label_ids += [pad_token_label_id]
+        label_ids += [[pad_token_label_id]]
         if sep_token_extra:
             # roberta uses an extra separator b/w pairs of sentences
             tokens += [sep_token]
-            label_ids += [pad_token_label_id]
+            label_ids += [[pad_token_label_id]]
         segment_ids = [sequence_a_segment_id] * len(tokens)
 
         if cls_token_at_end:
             tokens += [cls_token]
-            label_ids += [pad_token_label_id]
+            label_ids += [[pad_token_label_id]]
             segment_ids += [cls_token_segment_id]
         else:
             tokens = [cls_token] + tokens
-            label_ids = [pad_token_label_id] + label_ids
+            label_ids = [[pad_token_label_id]] + label_ids
             segment_ids = [cls_token_segment_id] + segment_ids
 
         input_ids = tokenizer.convert_tokens_to_ids(tokens)
@@ -355,12 +465,12 @@ def convert_examples_to_features(
             input_ids = ([pad_token] * padding_length) + input_ids
             input_mask = ([0 if mask_padding_with_zero else 1] * padding_length) + input_mask
             segment_ids = ([pad_token_segment_id] * padding_length) + segment_ids
-            label_ids = ([pad_token_label_id] * padding_length) + label_ids
+            label_ids = ([[pad_token_label_id]] * padding_length) + label_ids
         else:
             input_ids += [pad_token] * padding_length
             input_mask += [0 if mask_padding_with_zero else 1] * padding_length
             segment_ids += [pad_token_segment_id] * padding_length
-            label_ids += [pad_token_label_id] * padding_length
+            label_ids += [[pad_token_label_id]] * padding_length
 
         assert len(input_ids) == max_seq_length
         assert len(input_mask) == max_seq_length

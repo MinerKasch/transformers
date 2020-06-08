@@ -42,6 +42,8 @@ class DefaultDataCollator(DataCollator):
     See glue and ner for example of how it's useful.
     """
 
+    label_list: list = None
+
     def collate_batch(self, features: List[InputDataClass]) -> Dict[str, torch.Tensor]:
         # In this method we'll make the assumption that all `features` in the batch
         # have the same attributes.
@@ -59,11 +61,29 @@ class DefaultDataCollator(DataCollator):
                 labels = torch.tensor([f.label for f in features], dtype=torch.float)
             batch = {"labels": labels}
         elif hasattr(first, "label_ids") and first.label_ids is not None:
+            batch = {}
             if type(first.label_ids[0]) is int:
                 labels = torch.tensor([f.label_ids for f in features], dtype=torch.long)
+            if type(first.label_ids[0]) is list:
+                # Then each token actually has a list of labels; i.e. we are
+                # doing multi-labeling tagging.
+                all_label_ids = torch.tensor([[labels[0] for labels in f.label_ids]
+                                              for f in features], dtype=torch.long)
+                batch["label_mask"] = all_label_ids != -100
+                labels = torch.zeros((len(features), len(features[0].label_ids), len(self.label_list)))
+                for i, example in enumerate(features):
+                    for j, word_labels in enumerate(example.label_ids):
+                        for k in word_labels:
+                            if k == -100:
+                                # This case will get masked out for token
+                                # classification training anyway, so it doesn't
+                                # need to be included.
+                                continue
+                            # Set a flag corresponding to the label.
+                            labels[i, j, k] = 1
             else:
                 labels = torch.tensor([f.label_ids for f in features], dtype=torch.float)
-            batch = {"labels": labels}
+            batch["labels"] = labels
         else:
             batch = {}
 

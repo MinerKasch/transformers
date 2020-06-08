@@ -23,7 +23,7 @@ import warnings
 
 import torch
 from torch import nn
-from torch.nn import CrossEntropyLoss, MSELoss
+from torch.nn import CrossEntropyLoss, MSELoss, BCEWithLogitsLoss
 
 from .activations import gelu, gelu_new, swish
 from .configuration_bert import BertConfig
@@ -1376,6 +1376,69 @@ class BertForTokenClassification(BertPreTrainedModel):
                 loss = loss_fct(active_logits, active_labels)
             else:
                 loss = loss_fct(logits.view(-1, self.num_labels), labels.view(-1))
+            outputs = (loss,) + outputs
+
+        return outputs  # (loss), scores, (hidden_states), (attentions)
+
+@add_start_docstrings(
+    """Bert Model with a multilabel token classification head on top (a linear layer on top of
+    the hidden-states output) e.g. for Named-Entity-Recognition (NER) tasks. The distinction
+    between this class and BertForTokenClassification is that this model can support multiple
+    labels for a given token""",
+    BERT_START_DOCSTRING,
+)
+class BertForTokenMultiLabelClassification(BertPreTrainedModel):
+    def __init__(self, config):
+        super().__init__(config)
+        self.num_labels = config.num_labels
+
+        self.bert = BertModel(config)
+        self.dropout = nn.Dropout(config.hidden_dropout_prob)
+        self.classifier = nn.Linear(config.hidden_size, config.num_labels)
+
+        self.init_weights()
+
+    def forward(
+        self,
+        input_ids=None,
+        attention_mask=None,
+        token_type_ids=None,
+        position_ids=None,
+        head_mask=None,
+        inputs_embeds=None,
+        labels=None,
+        label_mask=None,
+    ):
+        outputs = self.bert(
+            input_ids,
+            attention_mask=attention_mask,
+            token_type_ids=token_type_ids,
+            position_ids=position_ids,
+            head_mask=head_mask,
+            inputs_embeds=inputs_embeds,
+        )
+
+        sequence_output = outputs[0]
+
+        sequence_output = self.dropout(sequence_output)
+        logits = self.classifier(sequence_output)
+
+        outputs = (logits,) + outputs[2:]  # add hidden states and attention if they are here
+
+        if labels is not None:
+            # Currently label_mask is of shape (batch_size, sentence-len),
+            # while labels is of shape (batch_size, sentence-len, num_tokens).
+            # Since we want to use the mask to mask out entire vectors, we
+            # unsqueeze it so that it's shape (batch_size, sentence-len, 1)
+            # so that we can broadcast it along the final dimension
+            mask = label_mask.unsqueeze(-1)
+
+            loss_fct = BCEWithLogitsLoss()
+            # Only keep active parts of the loss
+            masked_labels = torch.masked_select(labels, mask)
+            masked_logits = torch.masked_select(logits, mask)
+            loss = loss_fct(masked_logits, masked_labels)
+
             outputs = (loss,) + outputs
 
         return outputs  # (loss), scores, (hidden_states), (attentions)

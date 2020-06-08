@@ -125,6 +125,7 @@ setup(
         "sentencepiece",
         # for XLM
         "sacremoses",
+        "seqeval"
     ],
     extras_require=extras,
     entry_points={
