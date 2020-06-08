@@ -197,6 +197,22 @@ def main():
         else None
     )
 
+    def get_label_preds(predictions: np.ndarray) -> List[List[List[str]]]:
+        """ Returns a list of labels for each token in each sequence in the dataset. """
+        logit_threshold = 0.0 # Corresponds to a probability of 0.5 if fed through a sigmoid.
+        preds = predictions > logit_threshold
+
+        batch_size, seq_len, _ = preds.shape
+
+        out_label_list = [[] for _ in range(batch_size)]
+        preds_list = [[] for _ in range(batch_size)]
+
+        for i in range(batch_size):
+            for j in range(seq_len):
+                preds_list[i].append(
+                    [label_map[x] for x in np.where(preds[i][j] == 1)[0]])
+
+        return preds_list
 
     def align_predictions(predictions: np.ndarray,
                           label_ids: np.ndarray) -> Tuple[List[List[str]], List[List[str]]]:
@@ -289,7 +305,7 @@ def main():
         )
 
         predictions, label_ids, metrics = trainer.predict(test_dataset)
-        preds_list, _ = align_predictions(predictions, label_ids)
+        preds_list = get_label_preds(predictions)
 
         output_test_results_file = os.path.join(training_args.output_dir, "test_results.txt")
         if trainer.is_world_master():
@@ -302,20 +318,27 @@ def main():
         output_test_predictions_file = os.path.join(training_args.output_dir, "test_predictions.txt")
         if trainer.is_world_master():
             with open(output_test_predictions_file, "w") as writer:
-                with open(os.path.join(data_args.data_dir, "test.txt"), "r") as f:
-                    example_id = 0
-                    for line in f:
-                        if line.startswith("-DOCSTART-") or line == "" or line == "\n":
-                            writer.write(line)
-                            if not preds_list[example_id]:
-                                example_id += 1
-                        elif preds_list[example_id]:
-                            output_line = line.split()[0] + " " + " ".join(preds_list[example_id].pop(0)) + "\n"
-                            writer.write(output_line)
-                        else:
-                            logger.warning(
-                                "Maximum sequence length exceeded: No prediction for '%s'.", line.split()[0]
-                            )
+                # TODO We shouldn't be assuming test.txt is here.
+                for i, example in enumerate(test_dataset):
+                    for tok_id in example.input_ids:
+                        tok = tokenizer.convert_ids_to_tokens(tok_id)
+                        output_line = tok + " " + " ".join(preds_list[i].pop(0)) + "\n"
+                        writer.write(output_line)
+
+                    """
+                    cur_tok = ""
+                    for tok_id in example.input_ids:
+                        next_tok = tokenizer.convert_ids_to_tokens(tok_id)
+                        if next_tok.startswith("[") and next_tok.endswith("]"):
+                            continue
+                        # NOTE this is BERT-specific.
+                        if cur_tok.startswith("##"):
+                            cur_tok += next_tok
+                            continue
+                        cur_tok = next_tok
+                        output_line = cur_tok + " " + " ".join(preds_list[i].pop(0)) + "\n"
+                        writer.write(output_line)
+                    """
 
     return results
 
