@@ -78,6 +78,9 @@ class DataTrainingArguments:
     data_dir: str = field(
         metadata={"help": "The input data dir. Should contain the .txt files for a CoNLL-2003-formatted task."}
     )
+    data_format: str = field(
+        metadata={"help": "'spacy' or 'conll'"}
+    )
     labels: Optional[str] = field(
         metadata={"help": "Path to a file containing all labels. If not specified, CoNLL-2003 labels are used."}
     )
@@ -169,6 +172,7 @@ def main():
     train_dataset = (
         NerDataset(
             data_dir=data_args.data_dir,
+            data_format=data_args.data_format,
             tokenizer=tokenizer,
             labels=labels,
             model_type=config.model_type,
@@ -176,7 +180,6 @@ def main():
             overwrite_cache=data_args.overwrite_cache,
             mode=Split.train,
             multilabeling=True,
-            example_reader=fsn4nlp.run.utils_ner.read_examples_from_file
         )
         if training_args.do_train
         else None
@@ -184,6 +187,7 @@ def main():
     eval_dataset = (
         NerDataset(
             data_dir=data_args.data_dir,
+            data_format=data_args.data_format,
             tokenizer=tokenizer,
             labels=labels,
             model_type=config.model_type,
@@ -191,7 +195,6 @@ def main():
             overwrite_cache=data_args.overwrite_cache,
             mode=Split.dev,
             multilabeling=True,
-            example_reader=fsn4nlp.run.utils_ner.read_examples_from_file
         )
         if training_args.do_eval
         else None
@@ -297,6 +300,7 @@ def main():
     if training_args.do_predict:
         test_dataset = NerDataset(
             data_dir=data_args.data_dir,
+            data_format=data_args.data_format,
             tokenizer=tokenizer,
             labels=labels,
             model_type=config.model_type,
@@ -304,7 +308,6 @@ def main():
             overwrite_cache=data_args.overwrite_cache,
             mode=Split.test,
             multilabeling=True,
-            example_reader=fsn4nlp.run.utils_ner.read_examples_from_file
         )
 
         predictions, label_ids, metrics = trainer.predict(test_dataset)

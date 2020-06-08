@@ -16,6 +16,7 @@
 """ Named entity recognition fine-tuning: utilities to work with CoNLL-2003 task. """
 
 
+import json
 import logging
 import os
 from dataclasses import dataclass
@@ -66,8 +67,94 @@ class Split(Enum):
     test = "test"
 
 
-def read_examples_from_file(data_dir, mode: Union[Split, str],
-                            multilabeling=False) -> List[InputExample]:
+def read_spacy_examples_from_file(data_dir, tokenizer, mode: Union[Split, str],
+                                  multilabeling=False) -> List[InputExample]:
+    # TODO Ensure the option to not multilabel is handled correctly here.
+
+    if isinstance(mode, Split):
+        mode = mode.value
+    file_path = os.path.join(data_dir, f"{mode}.json")
+    with open(file_path) as f:
+        data = json.loads(f.read())
+
+    examples = []
+    guid_index = 1
+
+    for example in data:
+        raw = example[0]
+        entities = example[1]["entities"]
+
+        example_words = []
+        example_labels = []
+
+        num_spaces = 0
+        num_nonspaces = 0
+        for token in raw.split():
+            wordpieces = tokenizer.tokenize(token)
+            words = []
+            for wordpiece in wordpieces:
+                # TODO Change this because it's BERT-specific. RoBERTa doesn't
+                # uses the double-hash.
+                if wordpiece.startswith("##"):
+                    words[-1].append(wordpiece)
+                else:
+                    words.append([wordpiece])
+            #words = [join_wordpieces(word) for word in words]
+            words = [tokenizer.convert_tokens_to_string(word) for word in words]
+            for word in words:
+                word_labels = []
+                char_offset = num_nonspaces + num_spaces
+                for start, end, label in entities:
+                    is_start = False
+                    is_end = False
+                    is_middle = False
+                    if start < char_offset and end >= char_offset + len(word):
+                        # Then capture the entity that sits between the start
+                        # and end
+                        # Eg, capture the whole "Trains" token in:
+                        # Fleece works for Metro Trains Melbourne
+                        #                  ^ORG-start           ^ORG-end
+                        is_middle = True
+                    if start >= char_offset and start < char_offset + len(word):
+                        # Then this token is the start of the this entity.
+                        # Eg, capture whole "Metro" token in:
+                        # Fleece works for Metro Trains Melbourne
+                        #                    ^start
+                        # Fleece works for Metro Trains Melbourne
+                        #                  B-ORG
+                        is_start = True
+                    if end >= char_offset and end < char_offset + len(word):
+                        # Then this token should be tagged with entity.
+                        # Eg, capture the whole "Melbourne" token in:
+                        # Fleece works for Metro Trains Melbourne
+                        #                                  ^ORG-end
+                        is_end = True
+
+                    tag = None
+                    if is_start and is_end:
+                        tag = f"B-{label}"
+                    elif is_end:
+                        tag = f"I-{label}"
+                    elif is_start:
+                        tag = f"B-{label}"
+                    if is_middle:
+                        tag = f"I-{label}"
+                    if tag:
+                        word_labels.append(tag)
+                if word_labels == []:
+                    word_labels.append("O")
+                example_labels.append(word_labels)
+                example_words.append(word)
+
+                num_nonspaces += len(word)
+            num_spaces += 1
+        examples.append(InputExample(guid="{}-{}".format(mode, guid_index), words=example_words, labels=example_labels))
+        guid_index += 1
+    import pdb; pdb.set_trace()
+    return examples
+
+def read_conll_examples_from_file(data_dir, mode: Union[Split, str],
+                                  multilabeling=False) -> List[InputExample]:
     if isinstance(mode, Split):
         mode = mode.value
     file_path = os.path.join(data_dir, f"{mode}.txt")
@@ -107,6 +194,14 @@ def read_examples_from_file(data_dir, mode: Union[Split, str],
     return examples
 
 
+def read_examples_from_file(data_dir, data_format, tokenizer,
+                            mode: Union[Split, str],
+                            multilabeling=False) -> List[InputExample]:
+    if data_format == "conll":
+        return read_conll_examples_from_file(data_dir, mode, multilabeling=multilabeling)
+    elif data_format == "spacy":
+        return read_spacy_examples_from_file(data_dir, tokenizer, mode, multilabeling=multilabeling)
+
 if is_torch_available():
     import torch
     from torch import nn
@@ -126,6 +221,7 @@ if is_torch_available():
         def __init__(
             self,
             data_dir: str,
+            data_format: str,
             tokenizer: PreTrainedTokenizer,
             labels: List[str],
             model_type: str,
@@ -133,7 +229,6 @@ if is_torch_available():
             overwrite_cache=False,
             mode: Split = Split.train,
             multilabeling = False,
-            example_reader = read_examples_from_file,
         ):
             # Load data features from cache or dataset file
             cached_features_file = os.path.join(
@@ -150,7 +245,7 @@ if is_torch_available():
                     self.features = torch.load(cached_features_file)
                 else:
                     logger.info(f"Creating features from dataset file at {data_dir}")
-                    examples = example_reader(data_dir, mode, tokenizer=tokenizer, multilabeling=multilabeling)
+                    examples = read_examples_from_file(data_dir, data_format, tokenizer, mode, multilabeling=multilabeling)
                     # TODO clean up all this to leverage built-in features of tokenizers
                     self.features = convert_examples_to_features(
                         examples,
