@@ -150,7 +150,6 @@ def read_spacy_examples_from_file(data_dir, tokenizer, mode: Union[Split, str],
             num_spaces += 1
         examples.append(InputExample(guid="{}-{}".format(mode, guid_index), words=example_words, labels=example_labels))
         guid_index += 1
-    import pdb; pdb.set_trace()
     return examples
 
 def read_conll_examples_from_file(data_dir, mode: Union[Split, str],

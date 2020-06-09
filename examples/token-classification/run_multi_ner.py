@@ -39,9 +39,6 @@ from transformers import (
 from utils_ner import NerDataset, Split, get_labels
 
 import fsn4nlp.utils.conlleval
-import fsn4nlp.data.medmentions
-import fsn4nlp.run.utils_ner
-
 
 logger = logging.getLogger(__name__)
 
@@ -324,11 +321,14 @@ def main():
         output_test_predictions_file = os.path.join(training_args.output_dir, "test_predictions.txt")
         if trainer.is_world_master():
             with open(output_test_predictions_file, "w") as writer:
-                # TODO We shouldn't be assuming test.txt is here.
                 for i, example in enumerate(test_dataset):
                     for tok_id in example.input_ids:
                         tok = tokenizer.convert_ids_to_tokens(tok_id)
-                        output_line = f"{tok} {refs_list[i].pop(0)} {preds_list[i].pop(0)}\n"
+                        if refs_list[i][0] == []:
+                            output_line = f"{tok}\n"
+                            refs_list[i].pop(0)
+                        else:
+                            output_line = f"{tok} {refs_list[i].pop(0)} {preds_list[i].pop(0)}\n"
                         writer.write(output_line)
 
     return results
