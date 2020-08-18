@@ -25,8 +25,10 @@ from typing import List, Optional, Union
 
 from filelock import FileLock
 
+import spacy
 from transformers import PreTrainedTokenizer, is_tf_available, is_torch_available
 
+nlp = spacy.load("en_core_web_sm")
 
 logger = logging.getLogger(__name__)
 
@@ -68,8 +70,9 @@ class Split(Enum):
 
 
 def read_spacy_examples_from_file(data_dir, tokenizer, mode: Union[Split, str],
-                                  multilabeling=False) -> List[InputExample]:
-    # TODO Ensure the option to not multilabel is handled correctly here.
+                                  multilabeling=True) -> List[InputExample]:
+    if multilabeling == False:
+        raise NotImplementedError("Non-multilabeling approach to spacy-formatted input data not implemented yet.")
 
     if isinstance(mode, Split):
         mode = mode.value
@@ -90,17 +93,7 @@ def read_spacy_examples_from_file(data_dir, tokenizer, mode: Union[Split, str],
         num_spaces = 0
         num_nonspaces = 0
         for token in raw.split():
-            wordpieces = tokenizer.tokenize(token)
-            words = []
-            for wordpiece in wordpieces:
-                # TODO Change this because it's BERT-specific. RoBERTa doesn't
-                # uses the double-hash.
-                if wordpiece.startswith("##"):
-                    words[-1].append(wordpiece)
-                else:
-                    words.append([wordpiece])
-            #words = [join_wordpieces(word) for word in words]
-            words = [tokenizer.convert_tokens_to_string(word) for word in words]
+            words = [str(w) for w in nlp(token)]
             for word in words:
                 word_labels = []
                 char_offset = num_nonspaces + num_spaces
