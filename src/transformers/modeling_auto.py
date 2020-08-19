@@ -108,6 +108,7 @@ from .modeling_roberta import (
     RobertaForQuestionAnswering,
     RobertaForSequenceClassification,
     RobertaForTokenClassification,
+    RobertaForTokenMultiLabelClassification,
     RobertaModel,
 )
 from .modeling_t5 import T5ForConditionalGeneration, T5Model
@@ -260,7 +261,7 @@ MODEL_FOR_TOKEN_MULTILABEL_CLASSIFICATION_MAPPING = OrderedDict(
         # (CamembertConfig, CamembertForTokenMultiLabelClassification),
         # (XLMConfig, XLMForTokenMultiLabelClassification),
         # (XLMRobertaConfig, XLMRobertaForTokenMultiLabelClassification),
-        # (RobertaConfig, RobertaForTokenMultiLabelClassification),
+        (RobertaConfig, RobertaForTokenMultiLabelClassification),
         (BertConfig, BertForTokenMultiLabelClassification),
         # (XLNetConfig, XLNetForTokenMultiLabelClassification),
         # (AlbertConfig, AlbertForTokenMultiLabelClassification),
